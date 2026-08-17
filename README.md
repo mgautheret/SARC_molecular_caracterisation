@@ -7,9 +7,9 @@ These scripts analyze 3'RNA-seq and WES data from the sarcomatoid bladder cancer
 **Note (2026-08-17):** The WES pipeline is not yet available on this repository and is still under development.
 
 ## Installation
-\`\`\`
+```bash
 git clone https://github.com/mgautheret/SARC_molecular_caracterisation.git
-\`\`\`
+```
 
 ## Transcriptomic pipeline overview
 
