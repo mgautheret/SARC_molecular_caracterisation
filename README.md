@@ -42,8 +42,6 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts and sample m
 - networkD3 (0.4.1)
 - UpSetR (1.4.1)
 
-# WES pipeline overview 
-
 ## Acknowledgment 
 Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatics support.
 (DOI articles) 
