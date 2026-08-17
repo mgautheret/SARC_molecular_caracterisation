@@ -46,6 +46,7 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts and sample m
 
 ## Acknowledgment 
 Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatics support.
+(DOI articles) 
 
 ## Author 
 Madeleine Gautheret, Master's student and intern, Université de Rennes/IMPACT team
