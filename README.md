@@ -25,4 +25,29 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts, and sample 
 | **Microenvironment deconvolution** | Estimates immune/stromal cell composition per sample using MCPcounter via the [ImmuneDeconv interface](https://github.com/omnideconv/immunedeconv). |
 | **Signature_scoring.Rmd** | Computes scores for given transcriptomic signatures. |
 
+## Dependencies 
+- readxl (1.5.0)
+- UCell (2.14.0)
+- GOSemSim (2.36.0)
+- org.Hs.eg.db (3.22.0)
+- msigdbdf (25.1.0)
+- msigdbr (26.1.0)
+- enrichplot (1.30.5)
+- clusterProfiler (4.18.4)
+- classifyNMIBC (1.1.0)
+- consensusMIBC (1.1.0)
+- immunedeconv (2.1.4)
+- ComplexHeatmap (2.26.1)
+- edgeR (4.8.2)
+- networkD3 (0.4.1)
+- UpSetR (1.4.1)
 
+## Acknowledgment 
+Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatic support. 
+[articles]
+
+## Author 
+Madeleine Gautheret, Master's student and intern, Université de Rennes/IMPACT team
+
+
+  
