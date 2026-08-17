@@ -13,7 +13,7 @@ git clone https://github.com/mgautheret/SARC_molecular_caracterisation.git
 
 ## Transcriptomic pipeline overview
 
-Overall, the pipeline takes as input raw RNA-seq counts, TPM counts, and sample metadata, and produces classified/cleaned tables, differential expression results, and various QC/analysis plots.
+Overall, the pipeline takes as input raw RNA-seq counts, TPM counts and sample metadata, and produces molecular classifying, cleaned tables, differential expression results, and various QC/analysis plots.
 
 | Script | Description |
 |---|---|
@@ -42,9 +42,10 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts, and sample 
 - networkD3 (0.4.1)
 - UpSetR (1.4.1)
 
+# WES pipeline overview 
+
 ## Acknowledgment 
-Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatic support. 
-[articles]
+Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatics support.
 
 ## Author 
 Madeleine Gautheret, Master's student and intern, Université de Rennes/IMPACT team
