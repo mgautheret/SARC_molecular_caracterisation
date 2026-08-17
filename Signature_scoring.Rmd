@@ -1,0 +1,427 @@
+---
+title: "Signature scoring"
+output: html_document
+date: "2026-08-17"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  tpm_path: "results/01_RNA_seq/0_preprocessing/tpm_clean.csv"
+  metadata_path: "results/01_RNA_seq/0_preprocessing/metadata_clean.csv"
+  Ensembl2ID_path: "data/01_RNA_seq/CaVeSarc/KDI_2016560_2022-12-02_16-47-41/analysis_results/counts/tableannot.csv"
+  signatures_path: "data/01_RNA_seq/EMT_signatures/EMT_signatures.xlsx"
+  sig_EMT_jacqueline: "data/01_RNA_seq/EMT_signatures/EMT_signature_Jacqueline.csv"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(dplyr)
+library(tibble)
+library(UCell)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(tidyr)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(ggpubr)
+```
+
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+metadata_path <- params$metadata_path
+tpm_path <- params$tpm_path
+out_dir <- params$outdir
+Ensembl2ID_path<- params$Ensembl2ID_path
+sig_path <- params$signatures_path
+sig_fontugne_path <- params$sig_EMT_jacqueline
+```
+
+```{r data import}
+setwd(wd)
+
+data <- read.csv2(tpm_path, row.names = 1)
+
+metadata <- read.csv2(metadata_path,row.names=1, check.names=FALSE, stringsAsFactors = T,sep = ",")
+
+signatures <- read_excel(sig_path)
+EMT_fontugne <- read.csv2(sig_fontugne_path)
+```
+
+
+```{r Signature scoring}
+setwd(paste0(wd,out_dir))
+
+if (!dir.exists("4_Signature_scoring")) {
+  dir.create("4_Signature_scoring")
+}
+
+
+# EMT signatures from Ayabe et al. (2025), Nature Communications
+EMT_a <- signatures$EMT_76GS[-1]
+EMT_b <- signatures$EMTome_100[-1]
+# Remove missing gene names from the signatures
+EMT_a <- EMT_a[!is.na(EMT_a)]
+EMT_b <- EMT_b[!is.na(EMT_b)]
+
+
+# EMT signatures from Fontugne et al. (in-house data)
+# Genes are separated according to their EMT classification: epithelial or mesenchymal
+EMT_f_e <- EMT_fontugne$Genes[EMT_fontugne$EMT.class == "epithelial"]
+EMT_f_m <- EMT_fontugne$Genes[EMT_fontugne$EMT.class == "mesenchymal"]
+
+# Remove empty or missing gene names.
+EMT_f_e <- EMT_f_e[EMT_f_e != "" & !is.na(EMT_f_e)]
+EMT_f_m <- EMT_f_m[EMT_f_m != "" & !is.na(EMT_f_m)]
+
+
+
+
+scoreSignatureBulk <- function(CM, signature, n = 100,
+                               CM.mean = NULL, verbose = TRUE) {
+
+  # Scores a gene signature from bulk expression matrix.
+  # Arguments:
+  #   CM       : gene x sample expression matrix
+  #   signature: vector of gene symbols defining the signature
+  #   n        : number of control genes per signature gene
+  #   CM.mean  : optional pre-computed vector of gene-level mean expression
+  #   verbose  : whether to report the number of detected signature genes
+
+
+  # Keep only signature genes that are actually present
+  # in the expression matrix.
+  signature_presente <- intersect(signature, rownames(CM))
+
+  if(verbose) {
+    message(
+      "Gènes trouvés : ",
+      length(signature_presente), "/",
+      length(signature)
+    )
+  }
+
+  # Stop if none of the signature genes are detected.
+  if(length(signature_presente) == 0) {
+    stop("Aucun gène trouvé.")
+  }
+
+  # Compute mean expression across samples if it was not
+  # supplied beforehand.
+  if(is.null(CM.mean)) {
+    CM.mean <- rowMeans(CM, na.rm = TRUE)
+  }
+
+  # Calculate one score vector for each detected signature gene.
+  gene_scores <- lapply(signature_presente, function(gene) {
+
+    # Calculate the absolute difference in mean expression
+    # between the signature gene and every gene in the matrix.
+    dist_vector <- abs(CM.mean[gene] - CM.mean)
+
+    # Select the n genes with the closest mean expression.
+    # The first position corresponds to the gene itself,
+    # so it is excluded from the control set.
+    idx_controls <- order(dist_vector)[2:(n + 1)]
+
+    # Remove invalid indices if fewer than n control genes
+    # are available in the expression matrix.
+    idx_controls <- idx_controls[!is.na(idx_controls)]
+
+    # Compute the expression difference between the signature gene
+    # and the mean expression of its matched control genes.
+    return(
+      CM[gene, ] -
+        colMeans(CM[idx_controls, , drop = FALSE], na.rm = TRUE)
+    )
+  })
+
+  # Combine gene-level scores into a matrix
+  # (signature genes x samples).
+  score_matrix <- do.call(rbind, gene_scores)
+
+  # Average the gene-level scores to obtain one score per sample.
+  return(colMeans(score_matrix, na.rm = TRUE))
+}
+
+
+# Convert the input data to a matrix in case it was loaded
+# as a data.frame.
+mat <- as.matrix(data)
+
+# Reorder samples according to the SARC/non-SARC status, histological subtype then MIBC class
+col_order <- with(
+  metadata,
+  order(Sarcomatoid, Histological_subtype, MIBC_classif)
+)
+
+data <- mat[, col_order]
+
+
+# Define additional gene signatures
+
+egfr_ligands <- c("EGFR", "AREG", "AREGB", "EREG", "HBEGF", "TGFA")
+
+cell_cycle_early <- c("CCND1", "CCND2", "CCND3", "RBL2","ID1", "ID2", "ID3", "WEE1")
+
+cell_cycle_late <- c("CDK1", "CDK4", "CDK2", "CCNE1","CDC20", "CCNB2", "CCNB1", "CCNA2","BUB1", "CDC25A", "CCNE2", "MYBL2","FOXM1", "PLK1")
+
+
+# Store all signatures in a named list
+list_sigs <- list(
+  "EGFR_ligands" = egfr_ligands,
+  "Cell_cycle_early" = cell_cycle_early,
+  "Cell_cycle_late" = cell_cycle_late,
+  "Fontugne_Epithelial" = EMT_f_e,
+  "Fontugne_Mesenchymal" = EMT_f_m
+)
+
+
+# Apply the bulk signature scoring function to each signature.
+all_scores <- lapply(list_sigs, function(s) {
+  scoreSignatureBulk(
+    mat,
+    s,
+    verbose = FALSE
+  )
+})
+
+# Combine the signature scores into a data frame.
+results <- data.frame(
+  sample = colnames(mat),
+  Epithelial_score = all_scores$Fontugne_Epithelial,
+  Mesenchymal_score = all_scores$Fontugne_Mesenchymal,
+  Cell_cycle_early = all_scores$Cell_cycle_early,
+  Cell_cycle_late = all_scores$Cell_cycle_late,
+  EGFR_ligands = all_scores$EGFR_ligands
+)
+
+# Compute a global EMT score : positive values indicate a more mesenchymal-like profile, negative values indicate a more epithelial-like profile
+results$Global_score <-
+  results$Mesenchymal_score - results$Epithelial_score
+
+
+# Save the scoring results
+write.csv2(
+  results,
+  "4_Signature_scoring/signature_scoring_res.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r Heatmap}
+setwd(paste0(wd,out_dir))           
+
+# Z-score transformation
+
+mat_zscore <- t(scale(results[, -1]))
+
+# Restore sample IDs as column names.
+colnames(mat_zscore) <- results$sample
+
+
+-
+
+# Define the order in which EMT signatures will appear
+# in the heatmap.
+ordre_signatures <- c(
+  "Mesenchymal_score",
+  "Epithelial_score",
+  "Global_score"
+)
+
+# Reorder the signature matrix according defined order
+mat_zscore_ordered <- mat_zscore[
+  ordre_signatures,
+  col_order
+]
+
+
+col_fun <- colorRamp2(
+  c(-2, 0, 3),
+  c("navy", "white", "firebrick3")
+)
+
+
+
+# Create annotations displayed above the heatmap columns
+column_ha <- HeatmapAnnotation(
+
+  Histological_subtype =
+    metadata$Histological_subtype[col_order],
+
+  MIBC_subtype =
+    metadata$MIBC_classif[col_order],
+
+  col = list(
+    
+    gene_coverage = c(
+      "low"  = "powderblue",
+      "high" = "tomato"
+    ),
+
+    MIBC_subtype = c(
+      "Ba/Sq"       = "#E41A1C",
+      "LumU"        = "#377EB8",
+      "Stroma-rich" = "#FFFF33",
+      "NE-like"     = "#984EA3",
+      "LumP"        = "#4DAF4A"
+    ),
+
+    Histological_subtype = c(
+      "sarcomatoid"              = "#98FB98",
+      "conventional"             = "#9B5DE5",
+      "giant cells"              = "#E9C46A",
+      "glandular differentiation" = "tomato",
+      "micropapillary"            = "skyblue",
+      "neuroendocrine"            = "#264653",
+      "poorly differentiated"     = "violetred",
+      "squamous differentiation"  = "#F1FAEE"
+    )
+  ),
+  annotation_legend_param = list(
+    Histological_subtype = list(
+      title = "Histological subtype"
+    ),
+    MIBC_subtype = list(
+      title = "MIBC subtype"
+    )
+  )
+)
+
+
+# Compute heatmap
+
+# Replace underscores with spaces for more readable row labels
+row_labels <- gsub(
+  "_",
+  " ",
+  rownames(mat_zscore_ordered)
+)
+
+# Build the heatmap 
+fig2 <- Heatmap(
+  mat_zscore_ordered,
+  name = "Z-score",
+  column_title = "EMT score (Z-scores)",
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = col_fun,
+  row_labels = row_labels,
+  row_names_side = "right",
+  column_names_rot = 45,
+  row_title = "Signatures",
+  row_title_side = "left",
+  row_title_gp = gpar(
+    fontsize = 12,
+    fontface = "bold"
+  ),
+  top_annotation = column_ha,
+  rect_gp = gpar(
+    col = "white",
+    lwd = 0.5
+  ),
+  show_column_dend = FALSE,
+  show_column_names = FALSE
+)
+
+draw(fig2)
+
+# Save the heatmap
+png("4_Signature_scoring/EMT_heatmap.png", height = 600, width = 2800, res = 300).
+draw(fig2)
+dev.off()
+
+```
+```{r boxplots}
+setwd(paste0(wd,out_dir)) 
+t_mat_zscore <- t(mat_zscore) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample.ID")
+
+given_sig <- "EGFR_ligands" # change sig that you want to have a boxplot for here
+
+metadata_sig <- metadata %>%
+  inner_join(t_mat_zscore, by = "Sample.ID") %>%
+  dplyr::select(Sarcomatoid, given_sig, Sample.ID, patient)
+
+# The following block builds the data used to draw connecting lines between paired samples on the boxplot (SARC vs Non SARC)
+# We can't just group lines by "patient", because some patients have more than one sample per zone. Grouping by patient alone would fail to connect all samples. So we explicitly build every valid sarc/non-sarc pair per patient and give each pair its own unique ID (link_id)
+
+# Split expression values into two separate tables keeping the patient ID so we can match them back together
+sarc <- metadata_sig %>%
+  filter(Sarcomatoid == "Sarcomatoid") %>%
+  dplyr::select(patient, score_s = given_sig)
+
+nonsarc <- metadata_sig %>%
+  filter(Sarcomatoid == "Non Sarcomatoid") %>%
+  dplyr::select(patient, score_ns = given_sig)
+
+# Join sarc and non-sarc samples by patient: for patients with multiple zones this creates one row per possible sarc/non-sarc combination 
+pairs <- inner_join(sarc, nonsarc, by = "patient") %>%
+  mutate(link_id = row_number())   # un ID unique par ligne à tracer
+
+# Go back to long format since geom_line() needs paired x/y points as separate rows sharing the same link_id
+pairs_long <- pairs %>%
+  pivot_longer(
+    cols = c(score_s, score_ns),
+    names_to = "Sarcomatoid",
+    values_to = given_sig
+  ) %>%
+  mutate(Sarcomatoid = recode(Sarcomatoid,
+                                       score_s = "Sarcomatoid",
+                                       score_ns  = "NonSarcomatoid"))
+
+# Compute final boxplot 
+gg <- ggplot(pairs_long, aes(x = Sarcomatoid, y = given_sig, fill = Sarcomatoid)) + 
+  geom_boxplot(alpha = 0.7) +
+  geom_point() +
+  geom_line(aes(group = link_id),
+            color = "black",
+            alpha = 0.3) + 
+  scale_fill_manual(values = c("Sarcomatoid" = "palegreen", 
+                               "NonSarcomatoid" = "royalblue")) + 
+  stat_compare_means(comparison = list(c("NonSarcomatoid", "Sarcomatoid")),
+                     method = "wilcox.test",
+                     label = "p.signif" ,
+                     bracket.size = 0.3) + 
+  theme_bw() + 
+  labs(
+    title = "",
+    x = "",
+    y = paste0(given_sig,"score")
+  ) + 
+  scale_x_discrete(labels = c("NonSarcomatoid" = "Non SARC",  
+                              "Sarcomatoid"    = "SARC")) +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(
+          color  = "black",
+          face   = "bold",
+          size = 12, 
+          angle = 30, 
+          hjust = 1
+        ), 
+        axis.title.y = element_text(size = 12, face = "bold"))
+plot(gg)
+ggsave(paste0("4_Signature_scoring/", given_sig,"_boxplot.pdf"), gg)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,141 @@
+---
+title: "Molecular_classif"
+output: html_document
+date: "2026-02"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  raw_path: "data/01_RNA_seq/integ_dataset_new/integ_counts.csv"
+  metadata_path: "data/01_RNA_seq/integ_dataset_new/integ_metadata.csv"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(consensusMIBC)
+library(classifyNMIBC)
+library(dplyr)
+library(tibble)
+```
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+raw_path <- params$raw_path
+metadata_path <- params$metadata_path
+out_dir <- params$outdir
+```
+
+```{r Data_import}
+setwd(wd)
+SARC_data <- read.csv(raw_path,row.names=1,check.names = FALSE)
+metadata <- read.csv(metadata_path,row.names=1, check.names=FALSE)
+
+```
+
+This script apply molecular classification to CaVeSARC + VESPER 3'RNAseq data. consensusMIBC and UROMOL classifications are applied
+
+```{r consensusMIBC}
+setwd(paste0(wd,out_dir))
+
+if (!dir.exists("1_mol_class")) {
+  dir.create("1_mol_class")
+}
+
+# Log-transform expression data )
+SARC_data_log <- log2(SARC_data + 1)
+
+# Assign each sample to a consensus MIBC molecular class
+SARC_sample_MIBC_classes <- getConsensusClass(SARC_data_log, minCor = 0.2, gene_id = "ensembl_gene_id")
+
+# Add sample IDs as a column 
+SARC_sample_MIBC_classes$sample_id <- rownames(SARC_sample_MIBC_classes)
+
+# Add study ID for each sample from the metadata
+SARC_sample_MIBC_classes$study_id <- metadata$Study_ID_formated
+
+# Plot subtype correlation profiles for all samples
+plotCorrelations(SARC_sample_MIBC_classes)
+
+# Export classification results
+write.csv2(SARC_sample_MIBC_classes, "1_mol_class/MIBC_classes.csv",
+           row.names = FALSE)
+
+```
+
+```{r UROMOL classification}
+setwd(paste0(wd,out_dir))
+
+# Assign each sample to a consensus NMIBC molecular class
+SARC_sample_NMIBC_classes <- classifyNMIBC(SARC_data_log, minCor = 0.2, gene_id = "ensembl_gene_ID")
+
+# Move row names into a proper column
+SARC_sample_NMIBC_classes <- SARC_sample_NMIBC_classes %>%
+  rownames_to_column(var = "patient_id")
+
+# Export classification results 
+write.csv2(SARC_sample_NMIBC_classes, "1_mol_class/NMIBC_classes.csv",
+           row.names = FALSE)
+
+```
+
+```{r add to metadata, eval = FALSE}
+setwd(past0(wd,out_dir))
+# Add MIBC consensus classification directly as a new metadata column
+metadata$MIBC_classif <- SARC_sample_MIBC_classes$consensusClass
+
+
+# consensusMIBC column
+metadata <- metadata %>%
+  left_join(SARC_sample_MIBC_classes %>% 
+              dplyr::select(patient_id, consensus_MIBC = consensusClass), 
+            by = "patient_id")
+table(metadata$consensus_MIBC)
+
+# UROMOL column
+metadata <- metadata %>%
+  left_join(SARC_sample_NMIBC_classes %>% 
+              dplyr::select(patient_id, UROMOL_class = NMIBC_class), 
+            by = "patient_id")
+table(metadata$UROMOL_class)
+
+# Save metadata
+write.csv(metadata, "1_mol_class/metadata.csv",
+           row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,371 @@
+---
+title: " 3' RNA-seq Exploratory Analysis"
+output: html_document
+date: "2026-01"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  raw_path: "data/01_RNA_seq/integ_dataset_new/integ_counts.csv"
+  tpm_path: "data/01_RNA_seq/integ_dataset_new/integ_tpm.csv"
+  metadata_path: "data/01_RNA_seq/integ_dataset_new/integ_metadata.csv"
+  Ensembl2ID_path: "data/01_RNA_seq/CaVeSarc/KDI_2016560_2022-12-02_16-47-41/analysis_results/counts/tableannot.csv"
+  coding_genes_path: "data/01_RNA_seq/mart_export.txt"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tibble)
+library(RColorBrewer)
+library(ade4)
+library(ggpubr)
+library(forcats)
+```
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+countData_path <- params$raw_path
+colData_path   <- params$metadata_path
+tpm_path <- params$tpm_path
+out_dir <- params$outdir
+Ensembl2ID_path<- params$Ensembl2ID_path
+coding_genes_path <- params$coding_genes_path
+```
+
+```{r Data_import}
+setwd(wd)
+CountData <- read.csv(countData_path,row.names=1, check.names=FALSE)
+CountData <- as.matrix(CountData)
+
+tpm <- read.csv(tpm_path, row.names=1, check.names = FALSE)
+
+ColData <- read.csv(colData_path,row.names=1, check.names=FALSE)
+
+Ensembl2ID <- read.csv(Ensembl2ID_path) 
+
+rownames(tpm) <-make.unique(Ensembl2ID$gene_name[match(rownames(tpm), Ensembl2ID$gene_id)])
+
+coding_genes_list <- read.table(coding_genes_path, sep ="\t")
+
+```
+
+```{r, define colors }
+
+# Set colors for next plots 
+  col = list(
+    MIBC_class = c(
+      "Ba/Sq" = "#E41A1C",
+      "LumU" = "#377EB8",
+      "Stroma-rich" = "#FFFF33",
+      "NE-like" = "#984EA3",
+      "LumP" = "#4DAF4A"
+    ),
+    Histological_subtype = c(
+      "sarcomatoid" = "#98FB98",
+      "conventional" = "#9B5DE5",
+      "giant cells" = "#E9C46A",
+      "glandular differentiation" = "tomato",
+      "micropapillary" = "skyblue",
+      "neuroendocrine" = "#264653",
+      "poorly differentiated" = "violetred", 
+      "squamous differentiation" = "grey85"
+    ), 
+    Sarcomatoid = c(
+      "Sarcomatoid" = "palegreen", 
+      "Non Sarcomatoid" = "royalblue"
+    )
+  )
+
+```
+
+```{r Data_filtering}
+
+# Remove genes that are not expressed in any sample
+CountData <- CountData[ rowSums(CountData) > 0, ]
+tpm <- tpm[ rowSums(tpm) > 0, ]
+
+table_patient <- table(ColData$patient, ColData$Sarcomatoid)
+table_patient
+
+# keep only patients with sarc and non sarc zones
+keep_patients <- rownames(table_patient)[apply(table_patient, 1, function(x) all(x > 0))]
+keep_patients
+
+# Apply filter to metadata, counts and tpm tables
+ColData <-ColData[ColData$patient %in% keep_patients, ]
+CountData <- CountData[, rownames(ColData)]
+tpm <- tpm[, rownames(ColData)]
+```
+
+# Data Visualisation 
+
+## Visualize distributions of different variables accross samples 
+```{r barplots}
+### Barplots
+
+colnames(ColData)[colnames(ColData) == 'Variant'] <- 'Histological_subtype'
+
+
+ggplot(ColData, aes(x = fct_infreq(Histological_subtype), fill = Histological_subtype)) +
+  scale_fill_manual(name = "Histological subtype", values = col$Histological_subtype) +
+  geom_bar(col = "black") +
+  labs(title = "Proportion of samples by histological subtype", x = "Histological subtype") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, face= "bold"),
+        axis.title = element_blank())
+
+
+ggplot(ColData, aes(x = Sarcomatoid, fill = MIBC_classif)) +
+  scale_fill_manual(name = "MIBC class", values = col$MIBC_class) +
+  geom_bar(col = "black", position = "fill") +
+  labs(title = "Proportion of MIBC subtypes") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, face= "bold"),
+        axis.title = element_blank())
+
+
+```
+
+## Counts QC
+
+### All genes 
+
+```{r counts QC}
+# Generate figures to check the quality of RNA-seq data. 
+
+df_qc <- data.frame(
+  sample = colnames(CountData),genes_detected = colSums(CountData != 0),total_counts   = colSums(CountData),Sarcomatoid=ColData$Sarcomatoid, Cohort=ColData$cohort
+)
+
+# Plots to visualize how many genes are detected in each samples compared to the number of reads. Number of reads should correlate with the number of genes detected. 
+
+# Colored by SARC/non-SARC 
+ggplot(df_qc, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Sarcomatoid
+)) +
+  scale_color_manual(values = col$Sarcomatoid) +
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Sarcomatoid"
+  ) 
+
+# Colored by cohort 
+
+ggplot(df_qc, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Cohort
+)) +
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Cohort"
+  ) 
+
+```
+
+### Non coding genes only
+
+```{r counts QC non coding }
+# Filter raw counts df to keep only non-coding genes 
+Counts_noncoding <- CountData[!rownames(CountData) %in% coding_genes_list$V1,]
+
+# create dataframe for plot 
+df_qc_non_coding <- data.frame(
+  sample = colnames(Counts_noncoding),genes_detected = colSums(Counts_noncoding != 0),total_counts   = colSums(Counts_noncoding),Sarcomatoid=ColData$Sarcomatoid,Cohort=ColData$cohort)
+
+# Plot to visualize how many genes are detected in each samples compared to the number of reads. 
+ggplot(df_qc_non_coding, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Sarcomatoid
+)) +
+  scale_color_manual(values = col$Sarcomatoid)+
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Sarcomatoid"
+  ) 
+
+# Same plot but visualizing potential batch effect between cohorts
+
+ggplot(df_qc_non_coding, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Cohort
+)) +
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Cohort"
+  ) 
+
+```
+
+### Coding genes only 
+
+```{r coding }
+
+# Filter raw counts df to keep only non-coding genes 
+Counts_coding <- CountData[rownames(CountData) %in% coding_genes_list$V1,]
+tpm_coding <- tpm[rownames(tpm) %in% coding_genes_list$V2,]
+
+# create dataframe for plot 
+df_qc_coding <- data.frame(
+  sample = colnames(Counts_coding),genes_detected = colSums(Counts_coding != 0),total_counts   = colSums(Counts_coding),Sarcomatoid=ColData$Sarcomatoid,Cohort=ColData$cohort)
+
+# Plot to visualize how many genes are detected in each samples compared to the number of reads. 
+# Plot to visualize how many genes are detected in each samples compared to the number of reads. 
+ggplot(df_qc_coding, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Sarcomatoid
+)) +
+  scale_color_manual(values = col$Sarcomatoid)+
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Sarcomatoid"
+  ) 
+
+# Same plot but visualizing potential batch effect between cohorts
+
+ggplot(df_qc_coding, aes(
+  x = genes_detected,
+  y = total_counts,
+  color = Cohort
+)) +
+  geom_point(size = 2) +
+  labs(
+    x = "Gene coverage",
+    y = "Counts",
+    color = "Cohort"
+  ) 
+
+```
+
+
+
+### PCA
+
+
+```{r PCA}
+# Principal components analysis 
+
+# Log2 + scale + select only 1000 most variable genes for PCA
+tpm_log <- log2(tpm + 1)
+
+vars <- apply(tpm_log, 1, var)  
+tpm_topVar <- tpm_log[order(vars, decreasing = TRUE)[1:1000], ]
+
+t_tpm_log <- t(tpm_topVar)
+
+t_tpm_log_scaled<- scale(t_tpm_log)
+
+pca_proj <- dudi.pca(t_tpm_log_scaled, scannf = FALSE, nf = 5)
+
+
+# Concat annotations and PCA results
+df_pca_proj <- data.frame(
+  sample = colnames(Counts_coding),Sarcomatoid=ColData$Sarcomatoid,Cohort=ColData$cohort, MIBC_class = ColData$MIBC_classif, Histological_subtype = ColData$Histological_subtype,patient = ColData$patient, proj = pca_proj$li)
+
+# Plot PCA with the differents annotations 
+
+# Histological Subtypes
+ggplot(df_pca_proj, aes(x = proj.Axis1, y = proj.Axis2)) +
+  geom_line(aes(group = patient),
+            color = "black",
+            alpha = 0.3) +
+  ylim(-20,20)+
+  geom_point(aes(col = Histological_subtype), size = 2) +
+  scale_color_manual(values = col$Histological_subtype) +
+  theme_bw()+
+  labs(x = "PC1", y = "PC2") + 
+  theme (
+    axis.title = element_text(size = 13), 
+    legend.text = element_text(size = 11)
+  )
+
+# Sarcomatoid vs Non Sarcomatoid 
+ggplot(df_pca_proj, aes(x = proj.Axis1, y = proj.Axis2)) +
+  geom_line(aes(group = patient),
+            color = "black",
+            alpha = 0.3) +
+  ylim(-20,20)+
+  geom_point(aes(col = Sarcomatoid), size = 2) +
+  scale_color_manual(values = col$Sarcomatoid) +
+  theme_bw()+
+  labs(x = "PC1", y = "PC2") + 
+  theme (
+    axis.title = element_text(size = 13), 
+    legend.text = element_text(size = 11)
+  )
+
+
+# MIBC consensus classes 
+ggplot(df_pca_proj, aes(x = proj.Axis1, y = proj.Axis2)) +
+  geom_line(aes(group = patient),
+            color = "black",
+            alpha = 0.3) +
+  ylim(-20,20)+
+  geom_point(aes(col = MIBC_class), size = 2) +
+  scale_color_manual(values = col$MIBC_class) +
+  theme_bw()+
+  labs(x = "PC1", y = "PC2") + 
+  theme (
+    axis.title = element_text(size = 13), 
+    legend.text = element_text(size = 11)
+  )
+
+
+# Cohorts 
+ggplot(df_pca_proj, aes(x = proj.Axis1, y = proj.Axis2)) +
+  geom_line(aes(group = patient),
+            color = "black",
+            alpha = 0.3) +
+  ylim(-20,20)+
+  geom_point(aes(col = Cohort), size = 2) +
+  theme_bw()+
+  labs(x = "PC1", y = "PC2") + 
+  theme (
+    axis.title = element_text(size = 13), 
+    legend.text = element_text(size = 11)
+  )
+
+# Percentage of explained variance per axis (Scree plot)
+fviz_eig(pca_proj, addlabels = TRUE)
+```
+
+```{r , save clean data}
+setwd(paste0(wd,out_dir))
+
+
+if (!dir.exists("0_preprocessing")) {
+  dir.create("0_preprocessing")
+}
+
+
+write.csv2(Counts_coding, "0_preprocessing/rawCounts_clean.csv")
+write.csv2(tpm_coding, "0_preprocessing/tpm_clean.csv")
+write.csv(ColData, "0_preprocessing/metadata_clean.csv")
+```
+
+
+
+
+

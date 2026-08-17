@@ -1,0 +1,274 @@
+---
+title: "Immunedeconv"
+output: html_document
+date: "2026-03"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  raw_path: "results/01_RNA_seq/0_preprocessing/rawCounts_clean.csv"
+  tpm_path: "results/01_RNA_seq/0_preprocessing/tpm_clean.csv"
+  metadata_path: "results/01_RNA_seq/0_preprocessing/metadata_clean.csv"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(dplyr)
+library(readr)
+library(tidyr)
+library(ggplot2)
+library(immunedeconv)
+library(ComplexHeatmap)
+library(circlize)
+library(tibble)
+library(tidyverse)
+library(ggpubr)
+library(patchwork)
+```
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+raw_path <- params$raw_path
+metadata_path <- params$metadata_path
+out_dir <- params$outdir
+```
+
+
+```{r data import}
+setwd(wd)
+data <- read.csv2(raw_path, row.names = 1)
+metadata <- read.csv2(metadata_path,  sep = ",", row.names = 1)
+```
+
+```{r rearrange data for MCPCounter}
+
+data$gene_name <- rownames(data)
+
+data <- data %>%
+  mutate(across(-c(gene_name), ~ as.numeric(as.character(.))))
+
+data <- data %>%
+  group_by(gene_name) %>%
+  summarise(across(where(is.numeric), mean), .groups = "drop") %>%
+  as.data.frame()
+
+# Convert df to matrix 
+rownames(data) <- data$gene_name
+
+data$gene_name <- NULL
+
+data_mat <- as.matrix(data)
+storage.mode(data_mat) <- "numeric"
+
+```
+
+```{r Deconvolution}
+setwd(paste0(wd,out_dir))
+
+# MCP-counter estimates the relative abundance of 10 immune and stromal cell populations (T cells, CD8 T cells, NK cells, B lineage, monocytic lineage,myeloid dendritic cells, neutrophils, endothelial cells, fibroblasts) from bulk gene expression data.
+
+# Run deconvolution with MCP-counter via the immunedeconv wrapper
+deconv_result <- immunedeconv::deconvolute(data_mat, "mcp_counter")
+
+
+if (!dir.exists("3_deconvolution")) {
+  dir.create("3_deconvolution")
+}
+
+# Export the deconvolution results
+write.csv2(deconv_result, "3_deconvolution/deconv_results.csv",
+           row.names = FALSE)
+
+
+# Add deconv results to metadata
+deconv_result_transposed <- deconv_result %>%
+  pivot_longer(cols = -cell_type, names_to = "Sample.ID", values_to = "Value") %>%
+  pivot_wider(names_from = cell_type, values_from = Value)
+
+
+colnames(metadata)[1] <- "Sample.ID"
+metadata <- metadata[,-2]
+
+metadata <- metadata %>%
+  left_join(deconv_result_transposed, by = "Sample.ID")
+
+write.csv2(metadata, "3_deconvolution/metadata_deconv.csv",row.names = FALSE)
+```
+```{Plot results}
+setwd(paste0(wd,out_dir))
+
+# log2 transform for better visualization
+deconv_result_log <- deconv_result_transposed %>%
+  mutate(across(-Sample.ID, ~ log2(.x + 1)))
+
+# Add molecular class from metadata 
+metadata_short <- metadata %>% 
+  dplyr::select(Sample.ID, Sarcomatoid, Histological_subtype, MIBC_classif, patient)
+
+deconv_result_log <- deconv_result_log %>%
+  left_join(metadata_short, by = "Sample.ID")
+
+# 2. Nettoyage et préparation des données
+plot_data <- deconv_result_log %>%
+  filter(!is.na(MIBC_classif)) %>%
+  mutate(MIBC_classif = factor(MIBC_classif)
+
+cell_types <- c("T cell","T cell CD8+","cytotoxicity score","NK cell","B cell","Monocyte","Macrophage/Monocyte","Myeloid dendritic cell","Neutrophil","Endothelial cell","Cancer associated fibroblast")
+
+for(cell_type in cell_types){
+  sarc <- plot_data %>%
+    filter(Sarcomatoid == "Sarcomatoid") %>%
+    dplyr::select(patient, !!paste0(cell_type,"_sarc") := !!sym(cell_type))
+  
+  nonsarc <- plot_data %>%
+    filter(Sarcomatoid == "Non Sarcomatoid") %>%
+    dplyr::select(patient, !!paste0(cell_type,"_non") := !!sym(cell_type))
+  
+  pairs <- inner_join(sarc, nonsarc, by = "patient") %>%
+    mutate(link_id = row_number())   
+
+  pairs_long <- pairs %>%
+    pivot_longer(
+      cols = c(paste0(cell_type,"_sarc"), paste0(cell_type,"_non")),
+      names_to = "Sarcomatoid",
+      values_to = cell_type
+    ) %>%
+    mutate(Histological_subtype = recode(Sarcomatoid,
+                                         !!paste0(cell_type,"_sarc") := "Sarcomatoid",
+                                         !!paste0(cell_type,"_non")  := "Non Sarcomatoid"))
+}
+
+
+
+
+
+# for each MCP-counter cell type, build a paired boxplot (Sarcomatoid vs Non Sarcomatoid) with a Wilcoxon test, and store each plot in a named list for later display/export
+
+cell_types <- c("T cell","T cell CD8+","cytotoxicity score","NK cell","B cell","Monocyte",
+                "Macrophage/Monocyte","Myeloid dendritic cell","Neutrophil",
+                "Endothelial cell","Cancer associated fibroblast")
+
+plots_list <- list()
+
+for (cell_type in cell_types) {
+  
+  # Split the data into Sarcomatoid vs Non Sarcomatoid, keeping only the columns needed (patient ID, cell-type score and the MIBC class)
+  sarc <- plot_data %>%
+    filter(Sarcomatoid == "Sarcomatoid") %>%
+    dplyr::select(patient, sarc_val = !!sym(cell_type), MIBC_classif)
+  
+  nonsarc <- plot_data %>%
+    filter(Sarcomatoid == "Non Sarcomatoid") %>%
+    dplyr::select(patient, non_val = !!sym(cell_type))
+  
+  # assign a unique ID to plot paired boxplot latter
+  pairs <- inner_join(sarc, nonsarc, by = "patient") %>%
+    mutate(link_id = row_number())
+  
+  # Reshape to long format for ggplot
+  pairs_long <- pairs %>%
+    pivot_longer(
+      cols = c(sarc_val, non_val),
+      names_to = "Sarcomatoid",
+      values_to = "score"
+    ) %>%
+    mutate(Sarcomatoid = ifelse(Sarcomatoid == "sarc_val", "Sarcomatoid", "NonSarcomatoid"))
+  
+  # Build the paired boxplot
+  p <- ggplot(pairs_long, aes(x = Sarcomatoid, y = score, fill = Sarcomatoid)) + 
+    geom_boxplot(alpha = 0.7) +
+    geom_point() +
+    geom_line(aes(group = link_id), color = "black", alpha = 0.3) + 
+    scale_fill_manual(values = c("Sarcomatoid" = "palegreen", 
+                                 "NonSarcomatoid" = "royalblue")) + 
+    stat_compare_means(comparisons = list(c("NonSarcomatoid", "Sarcomatoid")),
+                       method = "wilcox.test",
+                       label = "p.signif",
+                       bracket.size = 0.3) + 
+    theme_minimal() + 
+    labs(
+      title = cell_type,
+      x = "",
+      y = "Abundance score",
+      legend = "Histological subtype"
+    ) + 
+    theme_bw() +
+    theme(legend.position = "none",
+          axis.text.x = element_text(color = "black", face = "bold", size = 12, angle = 30, hjust = 1), 
+          axis.title.y = element_text(size = 12, face = "bold"), 
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 15)) +
+    scale_x_discrete(labels = c("NonSarcomatoid" = "Non SARC",  
+                                "Sarcomatoid"    = "SARC")) 
+  
+  # Store the plot in a list with labels = cell types 
+  plots_list[[cell_type]] <- p
+}
+
+
+plots_list[["Monocyte"]] # Plot for given cell-type
+
+# Combine all plots 
+combined_plot <- wrap_plots(plots_list, ncol = 3)
+print(combined_plot)
+
+ggsave("3_deconvolution/all_celltypes_boxplots.png",
+       plot = combined_plot,width = 15, height = 15, dpi = 300)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

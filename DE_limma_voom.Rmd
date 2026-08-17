@@ -1,0 +1,410 @@
+---
+title: "DE_limma_voom"
+output: html_document
+date: "2026-05"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  raw_path: "results/01_RNA_seq/0_preprocessing/rawCounts_clean.csv"
+  tpm_path: "results/01_RNA_seq/0_preprocessing/tpm_clean.csv"
+  metadata_path: "results/01_RNA_seq/0_preprocessing/metadata_clean.csv"
+  Ensembl2ID_path: "data/01_RNA_seq/CaVeSarc/KDI_2016560_2022-12-02_16-47-41/analysis_results/counts/tableannot.csv"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(edgeR)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gplots)
+library(tibble)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(ggrepel)
+library(ggpubr)
+```
+
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+raw_path <- params$raw_path
+metadata_path <- params$metadata_path
+tpm_path <- params$tpm_path
+out_dir <- params$outdir
+Ensembl2ID_path<- params$Ensembl2ID_path
+```
+
+```{r Import data}
+setwd(wd)
+counts <- read.csv2(raw_path, row.names = 1)
+metadata <- read.csv2(metadata_path,  sep = ",", row.names = 1)
+tpm <- read.csv2(tpm_path, row.names = 1)
+Ensembl2ID <- read.csv(Ensembl2ID_path, row.names = 1)
+```
+
+```{r }
+# Create object of type Digital expression gene list from raw counts matrix. This object stocks count matrix, library size (sum of all counts for each samples) and set normalisation factor to 1. 
+d0 <- DGEList(counts)
+
+# Print object summary (norm factor to 1)
+d0
+
+# Compute normalisation factor with Trimmed means of M-values method.
+d0 <- calcNormFactors(d0)
+
+# Print object summary to verify that the previous stepped worked (different norm factor for each sample)
+d0
+
+# Remove genes from the count matrix that are not expressed in any sample 
+drop <- which(rowSums(counts) < 1)
+d <- d0[-drop,]
+dim(d)
+
+# Compute design matrix used for the statistical model
+metadata$Sarcomatoid <- gsub("Non Sarcomatoid", "NonSarcomatoid", metadata$Sarcomatoid)
+group <- factor(metadata$Sarcomatoid)
+design <- model.matrix(~0 + group) # With this design matrix gets one column per level of group (e.g. groupSarcomatoid and groupNon-sarcomatoid) filled with 0s and 1s indicating which group each sample belongs to
+
+```
+
+```{r voom transformation}
+# Transforms raw counts into log2-CPM values and estimates a mean-variance trend, which is used to compute weights for the linear model
+v <- voom(d, design)
+
+# Estimate the correlation between repeated measurements from the same patient (e.g. paired samples per patient).duplicateCorrelation() fits a mixed model treating "patient" as a random effect and returns a consensus correlation coefficient that quantifies how correlated samples from the same patient are
+corfit <- duplicateCorrelation(v, design, block = metadata$patient)
+
+# Re-compute voom transformation, this time incorporating the estimatedwithin-patient correlation from duplicateCorrelation()
+v <- voom(d, design, plot = TRUE,
+          block = metadata$patient,
+          correlation = corfit$consensus)
+
+# Re-estimate the duplicate correlation using the updated voom object 
+corfit <- duplicateCorrelation(v, design, block = metadata$patient)
+
+# Fit the linear model to each gene.
+fit <- lmFit(v, design, block = 
+               metadata$patient, correlation =
+               corfit$consensus)
+
+# Specify that we want to compare the "Sarcomatoid" group mean against the "NonSarcomatoid" group mean 
+
+cont_matrix <- makeContrasts(
+  SarcVsNonSarc = groupSarcomatoid - groupNonSarcomatoid,
+  levels = design
+)
+
+
+# Recalculates the coefficients and standard errors specifically for the Sarcomatoid vs NonSarcomatoid comparison.
+fit2 <- contrasts.fit(fit, cont_matrix)
+
+# eBayes() shrinks the per-gene variance estimates toward a common trend across all genes, which stabilizes variance estimates 
+fit2 <- eBayes(fit2)
+
+# Step 9: Extract the results table.(logFC, AveExpr, t, P.Value, adj.P.Val, B) for every gene
+result_single <- topTable(fit2, number = nrow(counts), sort.by =
+                            "none")
+```
+
+```{r Volcano Plot}
+setwd(paste0(wd,out_dir))
+
+# Convert Ensembl ID to gene ID in the results table
+rownames(result_single) <- make.unique(Ensembl2ID$gene_name[match(rownames(result_single), Ensembl2ID$gene_id)])
+
+# Define p-val threshold and logFC significativity threshold 
+log2FC_threshold <- 0.5
+stat_threshold <- 0.05
+stat_type <- "pvalue"
+
+# Create dataframe to plot results 
+plot_data <- data.frame(
+  gene_name = rownames(result_single),
+  log2FoldChange = result_single$logFC,
+  pval = result_single$adj.P.Val,
+  log10_pval = -log10(result_single$adj.P.Val)
+)
+
+# Define expression categories (UP/DOWN/NO)
+plot_data$diffexpressed <- "NO"
+plot_data$diffexpressed[plot_data$log2FoldChange > log2FC_threshold & plot_data$pval < stat_threshold] <- "UP"
+plot_data$diffexpressed[plot_data$log2FoldChange < -log2FC_threshold & plot_data$pval < stat_threshold] <- "DOWN"
+
+mycolors <- c("blue", "red", "grey")
+names(mycolors) <- c("DOWN", "UP", "NO")
+
+# Select Top 5 UP/ DOWN for labels
+
+# Filter significantly UP genes 
+up_genes <- subset(plot_data, diffexpressed == "UP")
+top_up <- head(up_genes[order(up_genes$pval, decreasing = FALSE), ], 5)
+
+# Filter significantly down genes 
+down_genes <- subset(plot_data, diffexpressed == "DOWN")
+top_down <- head(down_genes[order(down_genes$pval, decreasing = FALSE), ], 5)
+
+# Combine gene list 
+label_genes <- rbind(top_up, top_down, "FGFR1") # added FGFR1 because it is a gene of interest for this study
+
+
+# Create new columns for labels
+plot_data$delabel <- ifelse(plot_data$gene_name %in% label_genes$gene_name, as.character(plot_data$gene_name), "")
+
+# Plot volcano 
+
+# Without gene labels 
+p <- ggplot(data=plot_data, aes(x=log2FoldChange, y=log10_pval, col=diffexpressed)) +
+  geom_point(alpha=0.6, size=2) +
+  theme_minimal() +
+  geom_vline(xintercept=c(-log2FC_threshold, log2FC_threshold), col="red", linetype="dashed") +
+  geom_hline(yintercept=-log10(stat_threshold), col="red", linetype="dashed") +
+  scale_colour_manual(values = mycolors) +
+  coord_cartesian(xlim = c(-10, 10), ylim = c(0, 10)) +
+  labs(title = "Volcano plot Sarcomatoid vs Non Sarcomatoid",
+       x = "Log2(FC)",
+       y = "-log10(padj)",
+       color = "Expression")
+
+print(p)
+
+# With top up and down genes labeled 
+p_lab <- ggplot(data=plot_data, aes(x=log2FoldChange, y=log10_pval, col=diffexpressed, label = delabel)) +
+  geom_point(alpha=0.6, size=2) +
+  theme_minimal() +
+  geom_vline(xintercept=c(-log2FC_threshold, log2FC_threshold), col="red", linetype="dashed") +
+  geom_hline(yintercept=-log10(stat_threshold), col="red", linetype="dashed") +
+  # Gene labels 
+  geom_text_repel(
+    size = 3, 
+    box.padding = 0.5, 
+    point.padding = 0.5, 
+    segment.color = 'grey50', 
+    max.overlaps = Inf 
+  ) +
+  scale_colour_manual(values = mycolors) +
+  coord_cartesian(xlim = c(-6, 6), ylim = c(0, 5)) +
+  labs(title = "Volcano plot Sarcomatoid vs Non Sarcomatoid",
+       x = "Log2(FC)",
+       y = "-log10(p-value)",
+       color = "Expression") +
+  theme(
+    axis.title = element_text(size = 15), 
+    legend.title = element_text(size = 12), 
+    legend.text = element_text(size = 11)
+  )
+
+print(p_lab)
+
+if (!dir.exists("2_Differential_expression")) {
+  dir.create("2_Differential_expression")
+}
+
+ggsave("2_Differential_expression/volcano_lab.pdf", p_lab)
+ggsave("2_Differential_expression/volcano.pdf", p)
+
+# Save all genes with abs(logFC) > 1 for GSEA
+sup_1_genes <- subset(plot_data, abs(log2FoldChange) > 1)
+write.csv(sup_1_genes, "2_Differential_expression/DEGs_logFC_sup_1.csv", row.names = FALSE)
+
+# Save DEGs 
+DEGs <- rbind(up_genes,down_genes)
+write.csv(DEGs, "2_Differential_expression/DEGs.csv", row.names = FALSE)
+
+```
+
+```{r heatmap}
+setwd(paste0(wd,out_dir))
+
+# Apply log to tpm matrix 
+tpm_log <- log2(tpm + 1)
+
+
+# Extract all differentialy expressed genes to compute heatmap
+label_genes <- intersect(DEGs$gene_name, rownames(tpm_log)) 
+#TODO 10 genes do not have a match in tpm table, need a better fix later 
+
+# Remove duplicated gene name
+# rownames(tpm_log) <-make.unique(Ensembl2ID$gene_name[match(rownames(tpm_log), Ensembl2ID$gene_id)])
+
+
+# Change sample (columns) order to have all non sarcomatoid on one side and non sarcomatoid on the other + order with SARC non SARC by specific histological subtype, than by MIBC class
+col_order <- with(metadata, order(Sarcomatoid, Histological_subtype ,MIBC_classif))
+
+
+# Reorder columns of matrix, keep DE genes, and apply z-score 
+mat <- tpm_log[label_genes, col_order]
+mat <- mat[apply(mat, 1, sd) > 0, ]
+mat_zscore_row <- t(scale(t(mat)))
+
+
+# Define annotations for heatmap
+column_ha <- HeatmapAnnotation(
+  Histological_subtype = metadata$Histological_subtype[col_order],
+  MIBC_subtype = metadata$MIBC_classif[col_order],
+  Cohort = metadata$cohort[col_order],
+  
+  
+  #gene_coverage = metadata$gene_coverage[col_order]
+  
+  col = list(
+    MIBC_subtype = c(
+      "Ba/Sq" = "#E41A1C",
+      "LumU" = "#377EB8",
+      "Stroma-rich" = "#FFFF33",
+      "NE-like" = "#984EA3",
+      "LumP" = "#4DAF4A"
+    ),
+    Histological_subtype = c(
+      "sarcomatoid" = "#98FB98",
+      "conventional" = "#9B5DE5",
+      "giant cells" = "#E9C46A",
+      "glandular differentiation" = "tomato",
+      "micropapillary" = "skyblue",
+      "neuroendocrine" = "#264653",
+      "poorly differentiated" = "violetred", 
+      "squamous differentiation" = "#F1FAEE"
+    ),
+   Cohort = c(
+     "VESPER"  = "skyblue",
+     "CaVeSARC" = "tomato"
+   )
+  )
+)
+
+# Compute heatmap
+Heatmap(
+  mat_zscore_row,
+  name = "Z-score",
+  top_annotation = column_ha,
+  cluster_columns = FALSE,
+  row_names_gp = gpar(fontsize = 6),
+  show_row_dend = FALSE,
+  show_column_names = FALSE,
+  show_row_names = FALSE
+)
+
+
+
+png("2_Differential_expression/heatmap.png", width = 1900, height = 1700, res = 300) 
+Heatmap(
+  mat_zscore_row,
+  name = "Z-score",
+  top_annotation = column_ha,
+  cluster_columns = FALSE,
+  row_names_gp = gpar(fontsize = 6),
+  show_row_dend = FALSE,
+  show_column_names = FALSE,
+  show_row_names = FALSE
+)
+dev.off()
+
+
+
+```
+
+```{r paired boxplots}
+setwd(paste0(wd,out_dir))
+
+# Indicate gene of interest
+given_gene <- "FGFR1"
+
+mat_gene <- tpm_log[given_gene,] 
+
+# Subsample Non SARC (ns) and SARC (s) samples 
+ns_samples <- mat_gene[,metadata$Sarcomatoid == "NonSarcomatoid"]
+s_samples <- mat_gene[,metadata$Sarcomatoid == "Sarcomatoid"]
+
+# check if data follow normal distribution
+shapiro.test(as.numeric(ns_samples))
+shapiro.test(as.numeric(s_samples))
+
+# Create dataframe with expression of given gene, histological subtype and patient affiliation
+boxplot_df <- data.frame(
+  row.names   = colnames(tpm_log),
+  gene_level = as.numeric(tpm_log[given_gene, ]),
+  Histological_subtype = metadata$Sarcomatoid[match(colnames(tpm_log), rownames(metadata))],
+  patient = metadata$patient[match(colnames(tpm_log), rownames(metadata))]
+)
+
+
+# The following block builds the data used to draw connecting lines between paired samples on the boxplot (SARC vs Non SARC)
+# We can't just group lines by "patient", because some patients have more than one sample per zone. Grouping by patient alone would fail to connect all samples. So we explicitly build every valid sarc/non-sarc pair per patient and give each pair its own unique ID (link_id)
+
+# Split expression values into two separate tables keeping the patient ID so we can match them back together
+sarc <- boxplot_df %>%
+  filter(Histological_subtype == "Sarcomatoid") %>%
+  select(patient, expression_s = gene_level)
+
+nonsarc <- boxplot_df %>%
+  filter(Histological_subtype == "NonSarcomatoid") %>%
+  select(patient, expression_ns = gene_level)
+
+# Join sarc and non-sarc samples by patient: for patients with multiple zones this creates one row per possible sarc/non-sarc combination 
+pairs <- inner_join(sarc, nonsarc, by = "patient") %>%
+  mutate(link_id = row_number())  
+
+# Go back to long format since geom_line() needs paired x/y points as separate rows sharing the same link_id
+pairs_long <- pairs %>%
+  pivot_longer(
+    cols = c(expression_s, expression_ns),
+    names_to = "Histological_subtype",
+    values_to = "expression_level"
+  ) %>%
+  mutate(Histological_subtype = recode(Histological_subtype,
+                                       expression_s = "Sarcomatoid",
+                                       expression_ns  = "NonSarcomatoid"))
+
+
+# Compute final boxplot 
+boxplot <- ggplot(pairs_long, aes(x = Histological_subtype, y = expression_level, fill = Histological_subtype)) + 
+  geom_boxplot( alpha = 0.7) +
+  geom_point(size = 1) +
+  geom_line(aes(group = link_id),
+            color = "black",
+            alpha = 0.3) + 
+  scale_fill_manual(values = c("Sarcomatoid" = "palegreen", 
+                              "NonSarcomatoid" = "royalblue")) + 
+  stat_compare_means(comparison = list(c("NonSarcomatoid", "Sarcomatoid")),
+                     method = "wilcox.test", # if both distribution are normal replace with t.test
+                     label = "p.signif" ,
+                     bracket.size = 0.3) + 
+  theme_minimal() + 
+  labs(
+    title = "",
+    x = "",
+    y = paste0(given_gene, "expression")
+  ) + 
+  scale_x_discrete(labels = c("NonSarcomatoid" = "Non SARC",  
+                              "Sarcomatoid"    = "SARC")) +
+  theme_bw() +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(
+          color  = "black",
+          face   = "bold",
+          size = 12,
+          angle = 30, 
+          hjust = 1
+        ), 
+        axis.title.y = element_text(size = 12, face = "bold"))
+
+
+ggsave(paste0("2_Differential_expression/",given_gene,"_boxplot.pdf"), boxplot)
+
+``` 
+
+
+
+
+
+
+
+
+
+
+

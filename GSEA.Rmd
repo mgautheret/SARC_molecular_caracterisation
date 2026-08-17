@@ -1,0 +1,198 @@
+---
+title: "GSEA"
+output: html_document
+date: "2026-04"
+params:
+  wd: "~/Stage_M2/proj_SARC/"
+  outdir: "results/01_RNA_seq/"
+  DEGs_path: "results/01_RNA_seq/1_Differential_expression/DEGs_logFC_sup_1.csv"
+---
+
+```{r, include = FALSE }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r Library_import}
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(msigdbr)
+library(dplyr)
+library(DOSE)
+library(forcats)
+library(AnnotationDbi)
+library(msigdbdf)
+library(org.Hs.eg.db)
+library(GOSemSim)
+library(stringr)
+```
+
+
+```{r, include = FALSE }
+wd <- params$wd
+knitr::opts_knit$set(root.dir = wd)
+out_dir <- params$outdir
+DEGs_path <- params$DEGs_path
+```
+
+```{r import DEGs list and order it}
+setwd(wd)
+
+# Load differential expressed genes 
+DEGs <- read.csv(DEGs_path, h = T)
+
+# Rename column for simplicity downstream
+colnames(DEGs)[colnames(DEGs) == "log2FoldChange"] <- "log2FC"
+
+# Keep only the columns needed for building the GSEA ranked gene list
+DEGs <- DEGs %>% 
+  dplyr::select(gene_name, pval, log10_pval, log2FC)
+
+
+# Build the ranking metric for GSEA: combine direction of change (sign of log2FC) with statistical significance (log10 p-value)
+geneList <- with(DEGs, setNames(sign(log2FC) * log10_pval, gene_name))
+
+# Sort genes from most positive to most negative score so that least interesting genes are in the middle of the list 
+geneList <- sort(geneList, decreasing = TRUE)
+
+```
+
+
+```{r GSEA}
+setwd(paste0(wd,out_dir))
+# This block performs GSEA against GO:BP than Hallmark and combines the two results 
+
+# Performs GSEA against Gene Ontology Biological Process terms, using the ranked gene list built earlier (signed significance score)
+gobp_res <- gseGO(
+  geneList      = geneList,
+  OrgDb         = org.Hs.eg.db,
+  keyType       = "SYMBOL",
+  ont           = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.01,
+  verbose       = FALSE
+)
+
+
+# GO terms are highly redundant (many similar/overlapping terms), so this collapses similar terms together keeping the most significant one
+gobp_simplified <- clusterProfiler::simplify(
+  gobp_res,
+  cutoff     = 0.7, # if you want to keep more terms, increase the cutoff. If you want less lower it 
+  by         = "p.adjust",
+  select_fun = min
+)
+
+# Extract results table and indicate the source database
+gobp_df <- gobp_simplified@result %>%
+  mutate(database = "GO:BP")
+
+
+# Get MSigDB Hallmark gene sets 
+hallmark_sets <- msigdbr(species = "Homo sapiens", collection = "H") %>%
+  dplyr::select(gs_name, gene_symbol) # if you want to perform GSEA against other gene sets check msigdbr_collections()
+
+# Perform GSEA against Hallmark gene sets, tryCatch so a failure (e.g. no significant terms) doesn't stop the whole script
+hallmark_res <- tryCatch(
+  GSEA(geneList, TERM2GENE = hallmark_sets, pvalueCutoff = 0.01, verbose = FALSE),
+  error = function(e) { message("Hallmark GSEA failed: ", e$message); NULL }
+)
+
+# Extract results table and tag the source database
+hallmark_df <- hallmark_res@result %>%
+  mutate(database = "Hallmark")
+
+# Merge both result sets into one table with only the columns needed for plotting
+combined_df <- bind_rows(
+  gobp_df     %>% dplyr::select(Description, p.adjust, NES, database),
+  hallmark_df %>% dplyr::select(Description, p.adjust, NES, database)
+) %>%
+  mutate(color = ifelse(NES < 0, "Enriched in Non-SARC", "Enriched in SARC"))
+
+# For each database and enrichment direction, keep only the top N terms ranked by absolute NES
+TOP_N <- 5 # Change the value here if you want to plot less/more terms 
+plot_df <- combined_df %>%
+  group_by(database, color) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = TOP_N) %>%
+  ungroup() %>%
+  mutate(
+    # Convert Hallmark to title case, leave GO:BP as it is
+    Description = ifelse(
+      database == "Hallmark",
+      str_to_title(str_replace_all(Description, "_", " ")),  
+      Description
+    ),
+    label = Description
+  )
+
+gg <- ggplot(plot_df,
+       aes(x = NES,
+           y = reorder(label, NES),
+           fill = color)) +
+  geom_bar(stat = "identity") +
+  geom_vline(xintercept = 0, linewidth = 0.4) +
+  labs(
+    x     = "Normalised Enrichment Score (NES)",
+    y     = NULL,
+    fill  = NULL,
+    title = "GSEA – Hallmark & GO:BP"
+  ) +
+  scale_fill_manual(values = c(
+    "Enriched in Non-SARC" = "royalblue",
+    "Enriched in SARC"     = "palegreen"
+  )) +
+  theme_classic(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.text.y     = element_text(size = 10),
+    plot.margin     = margin(10, 20, 10, 10),
+    legend.text = element_text(size = 10), 
+    axis.text.x = element_text(size = 10), 
+    axis.title.x = element_text( size = 12)
+  )
+
+plot(gg)
+
+if (!dir.exists("1_Differential_expression")) {
+  dir.create("1_Differential_expression")
+}
+
+ggsave("1_Differential_expression/GSEA_result.pdf")
+
+# Extract leading-edge genes (genes driving the enrichment signal) 
+leading_edge <- hallmark_res@result %>%
+  dplyr::select(Description, NES, pvalue, p.adjust, core_enrichment) %>%
+  mutate(
+    genes = str_replace_all(core_enrichment, "/", ", ")
+  )
+
+print(leading_edge)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
