@@ -20,7 +20,7 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts and sample m
 | **Molecular_classification.Rmd** | Classifies samples into MIBC/NMIBC subtypes using the [consensusMIBC](https://github.com/cit-bioinfo/consensusMIBC) and [UROMOL](https://github.com/sialindskrog/classifyNMIBC) classifiers. |
 | **QC_Exploratory_analysis.Rmd** | Runs quality control and PCA, and outputs cleaned counts/metadata tables used downstream. |
 | **Sankey.R and Upset.R** | Create Sankey and UpsetPlots to visualize MIBC class and histological subtype distribution and co-occurences within patients. | 
-| **Differential_expression_limma.Rmd** | Identifies differentially expressed genes between groups using Limma + voom, with volcano plot, heatmap, and boxplot visualizations. |
+| **DE_limma.Rmd** | Identifies differentially expressed genes between groups using Limma + voom, with volcano plot, heatmap, and boxplot visualizations. |
 | **GSEA.Rmd** | Runs Gene Set Enrichment Analysis on DE genes against Hallmark and GO pathway sets. |
 | **ImmuneDeconv.Rmd** | Estimates immune/stromal cell composition per sample using MCPcounter via the [ImmuneDeconv interface](https://github.com/omnideconv/immunedeconv). |
 | **Signature_scoring.Rmd** | Computes scores for given transcriptomic signatures. |
