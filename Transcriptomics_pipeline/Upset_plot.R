@@ -1,6 +1,5 @@
 # This script characterizes the distribution and co-occurrence of MIBC molecular classes and histological subtypes across patients, using pie charts to summarize their distribution and UpSet plots to visualize subtype/class combinationsobserved within individual patients.
 
-
 # Load packages
 library(dplyr)
 library(readr)
@@ -11,8 +10,6 @@ library(UpSetR)
 
 # Load metadata
 metadata <- read.csv2("~/Stage_M2/proj_SARC/results/01_RNA_seq/0_preprocessing/metadata_clean.csv",sep = ",")
-
-
 
 # Select relevant variables and remove duplicates
 # Keep only the variables required for the molecular and  histological classification analyses.
@@ -103,7 +100,6 @@ combination_counts <- patient_classes %>%
   arrange(desc(n))
 
 
-
 # create one row per patient/class combination.
 link_data <- patient_classes %>%
   separate_rows(
@@ -118,7 +114,6 @@ link_data <- patient_classes %>%
   mutate(
     patient_index = as.numeric(factor(patient))
   )
-
 
 
 # data are converted to wide format:
@@ -239,7 +234,6 @@ combination_counts <- patient_classes %>%
   arrange(desc(n))
 
 
-
 # Split the comma-separated subtype lists into individual rows to obtain one row per patient/subtype combination.
 link_data <- patient_classes %>%
   separate_rows(
@@ -254,7 +248,6 @@ link_data <- patient_classes %>%
   mutate(
     patient_index = as.numeric(factor(patient))
   )
-
 
 
 # Create a binary patient-by-histological-subtype matrix.
@@ -278,7 +271,6 @@ patient_classes <- metadata %>%
 # Convert to data frame
 patient_classes_df <- as.data.frame(patient_classes)
 
-
 # Assign color to each histological subtype.
 Histological_subtype <- c(
   "sarcomatoid"                 = "#98FB98",
@@ -298,7 +290,6 @@ Histological_subtype <- c(
   "admixed subtypes"            = "gold1",
   "large nested"                = "chartreuse"
 )
-
 
 # Generate histological subtype UpSet plot
 
