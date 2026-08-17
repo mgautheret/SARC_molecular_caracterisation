@@ -44,7 +44,9 @@ Overall, the pipeline takes as input raw RNA-seq counts, TPM counts and sample m
 
 ## Acknowledgment 
 Thanks to Guerric Gilbert (Institut Curie IMPACT team, Paris) for bioinformatics support.
-(DOI articles) 
+- Kamoun, A et. al. A Consensus Molecular Classification of Muscle-invasive Bladder Cancer, Eur Urol (2019), doi: https://doi.org/10.1016/j.eururo.2019.09.006
+- Lindskrog and Prip et al. An integrated multi-omics analysis identifies prognostic molecular subtypes of non-muscle-invasive bladder cancer. Nat Commun. 2021. PMID: 33863885. DOI: 10.1038/s41467-021-22465-w
+- Sturm G, Finotello F, Petitprez F, Zhang JD, Baumbach J, Fridman WH, List M, Aneichyk T. Comprehensive evaluation of transcriptome-based cell-type quantification methods for immuno-oncology. Bioinformatics. 2019 Jul 15;35(14):i436-i445. doi: 10.1093/bioinformatics/btz363.
 
 ## Author 
 Madeleine Gautheret, Master's student and intern, Université de Rennes/IMPACT team
