@@ -1,5 +1,5 @@
-# Molecular caracterisation of the sarcomatoid (SARC) bladder cancer variant 
-These scripts were used to perform transcriptomic and genomic profiling of the sarcomatoid bladder cancer variant in paired samples. This project is conducted by the IMPACT team at Institut Curie (Paris, France). 
+# Molecular caracterisation of the sarcomatoid (SARC) bladder cancer histological subtype
+These scripts were used to perform transcriptomic and genomic profiling of the sarcomatoid bladder cancer histological subtype in paired samples. This project is conducted by the IMPACT team at Institut Curie (Paris, France). 
 
 ## Description
 These scripts analyze 3'RNA-seq and WES data from CaVeSARC and VESPER cohorts. The transcriptomic pipeline covers preprocessing, visualization, molecular class prediction, differential expression, GSEA, and microenvironment deconvolution.
