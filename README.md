@@ -2,7 +2,7 @@
 These scripts were used to perform transcriptomic and genomic profiling of the sarcomatoid bladder cancer variant in paired samples. This project is conducted by the IMPACT team at Institut Curie (Paris, France). 
 
 ## Description
-These scripts analyze 3'RNA-seq and WES data from the sarcomatoid bladder cancer variant project (IMPACT team, Institut Curie). The transcriptomic pipeline covers preprocessing, visualization, molecular class prediction, differential expression, GSEA, and microenvironment deconvolution.
+These scripts analyze 3'RNA-seq and WES data from CaVeSARC and VESPER cohorts. The transcriptomic pipeline covers preprocessing, visualization, molecular class prediction, differential expression, GSEA, and microenvironment deconvolution.
 
 **Note (2026-08-17):** The WES pipeline is not yet available on this repository and is still under development.
 
